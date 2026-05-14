@@ -23,6 +23,6 @@ public:
 private:
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_command_subscriber_;
   rclcpp::Publisher<control_msgs::msg::JointTrajectoryControllerState>::SharedPtr controller_state_pub_;
-  std::vector<double> target_positions_{0.0};
-  std::vector<double> target_time_{0.0};
+  std::vector<double> target_positions_;
+  std::vector<double> target_time_{0.0, 0.0};
 };

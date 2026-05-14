@@ -22,8 +22,8 @@ namespace trx
 
 hardware_interface::CallbackReturn SeedHardwareInterface::on_init(const hardware_interface::HardwareInfo& info)
 {
-  if (info.joints.size() != 4) {
-    RCLCPP_FATAL(rclcpp::get_logger("SeedHW"), "Expected 4 joints, got %zu", info.joints.size());
+  if (info.joints.size() != 8) {
+    RCLCPP_FATAL(rclcpp::get_logger("SeedHW"), "Expected 8 joints, got %zu", info.joints.size());
     return hardware_interface::CallbackReturn::FAILURE;
   }
   info_ = info;
@@ -33,10 +33,11 @@ hardware_interface::CallbackReturn SeedHardwareInterface::on_init(const hardware
   info_ = info;
 
   serial_port_ = info_.hardware_parameters["serial_port"];
-  can_id_ = std::stoi(info_.hardware_parameters["can_id"]);
+  can_id1_ = std::stoi(info_.hardware_parameters["can_id1"]);
+  can_id2_ = std::stoi(info_.hardware_parameters["can_id2"]);
   controller_rate_ = std::stod(info_.hardware_parameters["controller_rate"]);
 
-  RCLCPP_INFO(rclcpp::get_logger("SeedHW"), "on_init called. serial_port=%s, can_id=%d", serial_port_.c_str(), can_id_);
+  RCLCPP_INFO(rclcpp::get_logger("SeedHW"), "on_init called. serial_port=%s, can_id1=%d, can_id2=%d", serial_port_.c_str(), can_id1_, can_id2_);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -57,9 +58,13 @@ hardware_interface::CallbackReturn SeedHardwareInterface::on_activate(const rclc
 {
   RCLCPP_INFO(rclcpp::get_logger("SeedHW"), "on_activate called");
   if (seed_) {
-    auto pos_result = seed_->getPosition(can_id_);
-    position_[3] = pulse_to_rad(pos_result[2]);
-    command_[0] = position_[3];
+    auto pos_result1 = seed_->getPosition(can_id1_);
+    position_[3] = pulse_to_rad(pos_result1[2]);
+    command_[3] = position_[3];
+
+    auto pos_result2 = seed_->getPosition(can_id2_);
+    position_[7] = pulse_to_rad(pos_result2[2]);
+    command_[7] = position_[7];
   }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -104,29 +109,54 @@ std::vector<hardware_interface::CommandInterface> SeedHardwareInterface::export_
 
 hardware_interface::return_type SeedHardwareInterface::read(const rclcpp::Time&, const rclcpp::Duration&)
 {
-    auto pos_result = seed_->getPosition(can_id_);
-    int pulse = pos_result[2];
-    if (pos_result[0] == 1) {
-        if (pulse <= 0) {
+    auto pos_result1 = seed_->getPosition(can_id1_);
+    int pulse1 = pos_result1[2];
+    if (pos_result1[0] == 1) {
+        if (pulse1 <= 0) {
             position_[0] = 0.0;
             position_[1] = 0.0;
             position_[2] = 0.0;
             position_[3] = 0.0;
-        } else if (pulse <= 52000) {
-            position_[0] = pulse * 1.2 / 52000.0; 
+        } else if (pulse1 <= 52000) {
+            position_[0] = pulse1 * 1.2 / 52000.0;
             position_[1] = 0.0;
             position_[2] = 0.0;
-            position_[3] = pulse_to_rad(pulse);
-        } else if (pulse <= 61000) {
+            position_[3] = pulse_to_rad(pulse1);
+        } else if (pulse1 <= 61000) {
             position_[0] = 1.2;
-            position_[1] = (pulse - 52000) * 0.8 / 8000.0; 
-            position_[2] = (pulse - 52000) * 0.8 / 8000.0;
-            position_[3] = pulse_to_rad(pulse); 
+            position_[1] = (pulse1 - 52000) * 0.8 / 8000.0;
+            position_[2] = (pulse1 - 52000) * 0.8 / 8000.0;
+            position_[3] = pulse_to_rad(pulse1);
         } else {
             position_[0] = 0.0;
             position_[1] = 0.0;
             position_[2] = 0.0;
             position_[3] = 0.0;
+        }
+    }
+    auto pos_result2 = seed_->getPosition(can_id2_);
+    int pulse2= pos_result2[2];
+    if (pos_result2[0] == 2) {
+        if (pulse2 <= 0) {
+            position_[4] = 0.0;
+            position_[5] = 0.0;
+            position_[6] = 0.0;
+            position_[7] = 0.0;
+        } else if (pulse2 <= 52000) {
+            position_[4] = pulse2 * 1.2 / 52000.0;
+            position_[5] = 0.0;
+            position_[6] = 0.0;
+            position_[7] = pulse_to_rad(pulse2);
+        } else if (pulse2 <= 61000) {
+            position_[4] = 1.2;
+            position_[5] = (pulse2 - 52000) * 0.8 / 8000.0;
+            position_[6] = (pulse2 - 52000) * 0.8 / 8000.0;
+            position_[7] = pulse_to_rad(pulse2);
+        } else {
+            position_[4] = 0.0;
+            position_[5] = 0.0;
+            position_[6] = 0.0;
+            position_[7] = 0.0;
         }
     }
     return hardware_interface::return_type::OK;
@@ -136,13 +166,13 @@ hardware_interface::return_type SeedHardwareInterface::write(const rclcpp::Time&
 {
     double lower = -2.0;
     double upper = 0.0;
-    double cmd_saturated = std::max(lower, std::min(command_[3], upper));
-    static int cmd_val_prev = 0;
-    int cmd_val = rad_to_pulse(cmd_saturated);
-    if(cmd_val != cmd_val_prev){
-        seed_->setPositionPulse(time_[3]*3000, cmd_val);
-        cmd_val_prev = cmd_val;
-    }
+    double cmd_saturated1 = std::max(lower, std::min(command_[3], upper));
+    int cmd_val1 = rad_to_pulse(cmd_saturated1);
+    seed_->setPositionPulse(time_[3]*3000, cmd_val1, can_id1_);
+    double cmd_saturated2 = std::max(lower, std::min(command_[7], upper));
+    int cmd_val2 = rad_to_pulse(cmd_saturated2);
+    seed_->setPositionPulse(time_[7]*3000, cmd_val2, can_id2_);
+
     return hardware_interface::return_type::OK;
 }
 

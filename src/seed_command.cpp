@@ -123,9 +123,9 @@ bool SeedCommand::readSerialCommand(std::vector<uint8_t>& _receive_data, uint16_
     return true;
 }
 
-void SeedCommand::setPositionPulse(int _speed ,int target_pulse)
+void SeedCommand::setPositionPulse(int _speed ,int target_pulse, int _id)
 {
-    uint8_t id = 1;       
+    uint8_t id = _id;
     uint8_t cmd = 0x68;   
     uint8_t time_H = (_speed  >> 8) & 0xFF;
     uint8_t time_L = _speed  & 0xFF;
@@ -150,40 +150,65 @@ void SeedCommand::setPosition(uint8_t id, uint8_t cmd, uint8_t c1, uint8_t c2, u
 
 std::array<int, 3> SeedCommand::getPosition(uint8_t _id)
 {
+  std::string target_packet = "";
+  int count = 0;
+  while(true){
+    fill(send_data_.begin(), send_data_.end(), 0);
+    send_data_[0] = 0x42;
+    send_data_[1] = _id;
+    writeSerialCommand(_id, send_data_.data());
 
-  fill(send_data_.begin(), send_data_.end(), 0);
-  send_data_[0] = 0x42;      
-  send_data_[1] = _id;       
-  writeSerialCommand(_id, send_data_.data());
+    std::vector<uint8_t> receive_data;
+    std::string id = "";
+    std::string command = "";
+    std::string velocity = "";
+    std::string position = "";
 
-  std::vector<uint8_t> receive_data;
-  std::string id = "";
-  std::string command = "";
-  std::string velocity = "";
-  std::string position = "";
+    if (!readSerialCommand(receive_data,50)) {
+        std::cout << "[getPosition] receive failed." << std::endl;
+        continue;
+    }
 
-   if (!readSerialCommand(receive_data,50)) {
-    std::cout << "[getPosition] receive failed." << std::endl;
-    return {0, 0, 0};
-  } 
+    std::string hex_ascii(receive_data.begin(), receive_data.end());
+    size_t t_pos = hex_ascii.find('t');
+    if (t_pos == std::string::npos) {
+        if(count == count_limit){
+            std::cout << "[getPosition] No valid packet found " << std::endl;
+            return{0,0,0};
+        } else{
+            std::cout << "[getPosition] No valid packet found. retry... " << std::endl;
+            count++;
+            continue;
+        }
+    }
+    std::string main_packet = hex_ascii.substr(t_pos);
 
-  std::string hex_ascii(receive_data.begin(), receive_data.end());
-  size_t t_pos = hex_ascii.find('t');
-  if (t_pos == std::string::npos) {
-      std::cout << "[getPosition] No valid packet found" << std::endl;
-      return {0, 0, 0};
+    if (main_packet.length() < 26) {
+        std::cout << "[getPosition] main_packet too short: " << main_packet.length() << std::endl;
+        continue;
+    }
+
+    std::string pre_id_str   = main_packet.substr(5, 1);
+    int pre_id_val  = std::stoi(pre_id_str, nullptr, 16);
+
+    if(pre_id_val != _id) {
+        if(count == count_limit){
+            std::cout << "[getPosition] Can not find target_id " << std::endl;
+            return{0,0,0};
+        } else{
+            std::cout << "[getPosition] No match target_id. retry... " << std::endl;
+            count++;
+            continue;
+        }
+    }
+
+    target_packet = main_packet;
+    break;
   }
-  std::string main_packet = hex_ascii.substr(t_pos);
 
-  if (main_packet.length() < 26) {
-      std::cout << "[getPosition] main_packet too short: " << main_packet.length() << std::endl;
-      return {0, 0, 0};
-  }  
-
-
-  std::string id_str   = main_packet.substr(5, 1); 
-  std::string cmd_str  = main_packet.substr(9, 2);
-  std::string pos_str  = main_packet.substr(15, 6); 
+  std::string id_str   = target_packet.substr(5, 1);
+  std::string cmd_str  = target_packet.substr(9, 2);
+  std::string pos_str  = target_packet.substr(15, 6);
 
   int id_val  = std::stoi(id_str, nullptr, 16);
   int cmd = std::stoi(cmd_str, nullptr, 16);

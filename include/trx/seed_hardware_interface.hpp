@@ -27,7 +27,8 @@ public:
 
 private:
   std::string serial_port_;
-  int can_id_;
+  int can_id1_;
+  int can_id2_;
   double controller_rate_;
 
   std::vector<double> position_;
