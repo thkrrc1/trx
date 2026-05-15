@@ -85,7 +85,7 @@
   <ros2_control name="SeedHW" type="system">
     <hardware>
       <plugin>trx/SeedHardwareInterface</plugin>
-      <param name="serial_port">/dev/ttyACM0</param>
+      <param name="serial_port">/dev/trx_s</param>
       <param name="can_id">1</param>
       <param name="controller_rate">20.0</param>
     </hardware>

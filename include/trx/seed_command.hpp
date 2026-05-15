@@ -9,7 +9,7 @@
 #include <boost/system/error_code.hpp>
 class SeedCommand {
 public:
-    SeedCommand(const std::string& port = "/dev/ttyACM0", int baudrate = 115200);
+    SeedCommand(const std::string& port = "/dev/trx_s", int baudrate = 115200);
     ~SeedCommand();
 
     bool COM_Open();
