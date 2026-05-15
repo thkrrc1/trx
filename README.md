@@ -10,7 +10,7 @@
     $ sudo nano /etc/udev/rules.d/90-aero.rules 
 
     【記入内容】
-    SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a1e8", ATTRS{serial}=="000000000001", SYMLINK+="trx_s", MODE="666"
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a1e8", SYMLINK+="trx_s", MODE="666"
     ```
     記入後、udev設定の適応
     ```
@@ -101,6 +101,22 @@
     下記画像のようにrqtのGUIが起動し、jointsのスライダーを動かして動作することが確認できればok.
     ![rqt＿GUI](https://github.com/user-attachments/assets/eb2d4a19-3fc8-461d-a316-50dc0c0b4c59)
 
-
+## ※諸注意
+1. ID変更対応<br>
+   制御するtrxのモータードライバー(SEED MC)のIDを把握した上で、ソースコード内の下記パラメータの記述を適宜修正してください。
+   ```
+   /trx/urdf/trx_s.urdf 内の記述
+              ︙
+   <ros2_control name="SeedHW" type="system">
+    <hardware>
+      <plugin>trx/SeedHardwareInterface</plugin>
+      <param name="serial_port">/dev/trx_s</param>
+      <param name="can_id">1</param>   ＜ーーーーーーーー制御するIDに合わせる（この場合は ID 1）
+      <param name="controller_rate">20.0</param>
+    </hardware>
+              ︙
+2. 依存パッケージ不具合（26/5/15 時点）<br>
+   ros-jazzy-joint-trajectory-controller、ros-jazzy-joint-state-broadcasterのパッケージバージョン v4.39において、Nodeが正常に起動しない不具合を確認しております。
+   構築環境にてこれらに起因する不具合を確認した場合、各パッケージ 推奨バージョン v4.36にダウングレードした上で、本パッケージを再度ビルドして動作をお試しください。
 
 以上
