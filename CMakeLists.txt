@@ -15,8 +15,14 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(trajectory_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(hardware_interface REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/RunScript.srv"
+)
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 ament_export_dependencies(rosidl_default_runtime)
 
@@ -34,10 +40,12 @@ add_library(seed_hardware_interface SHARED src/seed_hardware_interface.cpp)
 ament_target_dependencies(seed_hardware_interface
   rclcpp
   std_msgs
+  trajectory_msgs
   hardware_interface
 )
 target_link_libraries(seed_hardware_interface
   seed_command
+  "${cpp_typesupport_target}"
 )
 
 install(TARGETS seed_hardware_interface seed_command
@@ -56,7 +64,6 @@ install(FILES seed_hardware_interface_plugin.xml
 )
 
 pluginlib_export_plugin_description_file(hardware_interface seed_hardware_interface_plugin.xml)
-add_subdirectory(controller/trx_joint_trajectory_controller)
 install(FILES trx.rviz
   DESTINATION share/${PROJECT_NAME}
 )

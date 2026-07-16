@@ -20,6 +20,14 @@ int rad_to_pulse(double rad) {
 namespace trx
 {
 
+SeedHardwareInterface::~SeedHardwareInterface()
+{
+  executor_.cancel();
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+}
+
 hardware_interface::CallbackReturn SeedHardwareInterface::on_init(const hardware_interface::HardwareInfo& info)
 {
   if (info.joints.size() != 8) {
@@ -51,6 +59,15 @@ hardware_interface::CallbackReturn SeedHardwareInterface::on_configure(const rcl
     RCLCPP_ERROR(rclcpp::get_logger("SeedHW"), "Serial init failed: %s", e.what());
     return hardware_interface::CallbackReturn::FAILURE;
   }
+
+  node_ = std::make_shared<rclcpp::Node>("trx_seed_hardware_interface");
+  run_script_service_ = node_->create_service<trx::srv::RunScript>(
+    "/trx/run_script",
+    std::bind(&SeedHardwareInterface::runScriptCallback, this, std::placeholders::_1, std::placeholders::_2));
+    joint_trajectory_pub_ = node_->create_publisher<trajectory_msgs::msg::JointTrajectory>("/joint_trajectory_controller/joint_trajectory", rclcpp::SystemDefaultsQoS());
+  executor_.add_node(node_);
+  executor_thread_ = std::thread([this]() { executor_.spin(); });
+
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -109,6 +126,7 @@ std::vector<hardware_interface::CommandInterface> SeedHardwareInterface::export_
 
 hardware_interface::return_type SeedHardwareInterface::read(const rclcpp::Time&, const rclcpp::Duration&)
 {
+    std::lock_guard<std::mutex> lock(serial_mtx_);
     auto pos_result1 = seed_->getPosition(can_id1_);
     int pulse1 = pos_result1[2];
     if (pos_result1[0] == 1) {
@@ -164,6 +182,7 @@ hardware_interface::return_type SeedHardwareInterface::read(const rclcpp::Time&,
 
 hardware_interface::return_type SeedHardwareInterface::write(const rclcpp::Time&, const rclcpp::Duration&)
 {
+    std::lock_guard<std::mutex> lock(serial_mtx_);
     double lower = -2.0;
     double upper = 0.0;
     double cmd_saturated1 = std::max(lower, std::min(command_[3], upper));
@@ -174,6 +193,64 @@ hardware_interface::return_type SeedHardwareInterface::write(const rclcpp::Time&
     seed_->setPositionPulse(time_[7]*3000, cmd_val2, can_id2_);
 
     return hardware_interface::return_type::OK;
+}
+
+void SeedHardwareInterface::runScriptCallback(const std::shared_ptr<trx::srv::RunScript::Request> request,std::shared_ptr<trx::srv::RunScript::Response> response)
+{
+  std::lock_guard<std::mutex> lock(serial_mtx_);
+  if (!seed_) {
+    response->success = false;
+    return;
+  }
+  RCLCPP_INFO(rclcpp::get_logger("SeedHW"), "Running script %d on id %d", request->script_no, request->id);
+
+  // スクリプト実行
+  seed_->Script_Go(request->id, request->script_no);
+
+  // スクリプト終了判定
+  bool finished = seed_->waitForScriptEnd(request->id);
+  if (!finished) {
+    RCLCPP_WARN(rclcpp::get_logger("SeedHW"), "Timed out waiting for script %d on id %d to finish", request->script_no, request->id);
+  }
+
+  // request->id（サービスに渡されたCAN ID）が、can_id1_（1）かcan_id2_（2）のどちらかを判定
+  int idx = -1;
+  std::string joint_name;
+  if (request->id == can_id1_) {
+    idx = 3;
+    joint_name = "thumb_joint1";
+  } else if (request->id == can_id2_) {
+    idx = 7;
+    joint_name = "thumb_joint2";
+  }
+
+  // 現在位置の取得
+  if (idx >= 0) {
+    std::array<int, 3> pos_result = {0, 0, 0}; //応答ID, 速度, パルス位置
+    bool got_position = false;
+    for (int attempt = 0; attempt < 5 && !got_position; ++attempt) { // 5回リトライ
+      pos_result = seed_->getPosition(request->id); // 0x42コマンドで現在位置を問い合わせる
+      got_position = (pos_result[0] == request->id);
+    }
+
+    if (got_position) { // 状態の反映とpublish
+      position_[idx] = pulse_to_rad(pos_result[2]);// スクリプト実行後の姿勢を取得
+      command_[idx] = position_[idx]; // writeのsetPositionPulseでスクリプト実行前の姿勢に戻ってしまうのを防ぐために、次に送る目標値をスクリプト後の姿勢に書き換えている
+
+      trajectory_msgs::msg::JointTrajectory traj_msg;
+      traj_msg.joint_names = {joint_name};
+      trajectory_msgs::msg::JointTrajectoryPoint point;
+      point.positions = {position_[idx]};
+      point.time_from_start = rclcpp::Duration::from_seconds(0.0);
+      traj_msg.points = {point};
+      joint_trajectory_pub_->publish(traj_msg);
+      RCLCPP_INFO(rclcpp::get_logger("SeedHW"), "Re-synced %s to %.4f rad (pulse=%d) after script", joint_name.c_str(), position_[idx], pos_result[2]);
+    } else {
+      RCLCPP_WARN(rclcpp::get_logger("SeedHW"), "Failed to read back position for id %d after script; command_[] NOT re-synced (will likely snap back)", request->id);
+    }
+  }
+
+  response->success = finished;
 }
 
 }  // namespace trx

@@ -10,6 +10,8 @@
 #include <vector>
 #include <array>
 #include <functional>
+#include <chrono>
+
 using namespace std::placeholders;
 std::string num2str(int value, int byte = 1) {
     if (value < 0) value = 0xFFFFFF + 1 + value;
@@ -138,14 +140,52 @@ void SeedCommand::setPositionPulse(int _speed ,int target_pulse, int _id)
 void SeedCommand::setPosition(uint8_t id, uint8_t cmd, uint8_t c1, uint8_t c2, uint8_t c3, uint8_t c4, uint8_t c5)
 {
     uint8_t data[6];
-    data[0] = cmd;   
-    data[1] = c1;    
-    data[2] = c2;    
-    data[3] = c3;    
-    data[4] = c4;    
-    data[5] = c5;    
+    data[0] = cmd;
+    data[1] = c1;
+    data[2] = c2;
+    data[3] = c3;
+    data[4] = c4;
+    data[5] = c5;
 
-    writeSerialCommand(id, data);  
+    writeSerialCommand(id, data);
+}
+
+void SeedCommand::Script_Go(int id_num, int s_num)
+{
+    if (s_num > 0x00 && s_num < 0x0F) {
+        uint8_t data[6] = {0};
+        data[0] = 0x5F;
+        data[1] = static_cast<uint8_t>(id_num);
+        data[2] = static_cast<uint8_t>(s_num);
+        writeSerialCommand(static_cast<uint8_t>(id_num), data);
+    }
+}
+
+bool SeedCommand::waitForScriptEnd(int id_num, double timeout_sec)
+{
+    auto start = std::chrono::steady_clock::now();
+    while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < timeout_sec) {
+        std::vector<uint8_t> receive_data;
+        if (!readSerialCommand(receive_data, 500)) {
+            continue;
+        }
+        std::string hex_ascii(receive_data.begin(), receive_data.end());
+        size_t t_pos = hex_ascii.find('t');
+        if (t_pos == std::string::npos) {
+            continue;
+        }
+        std::string packet = hex_ascii.substr(t_pos);
+        if (packet.length() < 15) {
+            continue;
+        }
+
+        int id = str2int(packet.substr(5, 1));
+        int signal = str2int(packet.substr(13, 2));
+        if (id == id_num && signal == 0xFF) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::array<int, 3> SeedCommand::getPosition(uint8_t _id)
@@ -188,8 +228,14 @@ std::array<int, 3> SeedCommand::getPosition(uint8_t _id)
         continue;
     }
 
-    std::string pre_id_str   = main_packet.substr(5, 1);
-    int pre_id_val  = std::stoi(pre_id_str, nullptr, 16);
+    int pre_id_val;
+    try {
+        std::string pre_id_str = main_packet.substr(5, 1);
+        pre_id_val = std::stoi(pre_id_str, nullptr, 16);
+    } catch (const std::exception& e) {
+        std::cout << "[getPosition] failed to parse packet, skip: " << e.what() << std::endl;
+        continue;
+    }
 
     if(pre_id_val != _id) {
         if(count == count_limit){
@@ -206,14 +252,19 @@ std::array<int, 3> SeedCommand::getPosition(uint8_t _id)
     break;
   }
 
-  std::string id_str   = target_packet.substr(5, 1);
-  std::string cmd_str  = target_packet.substr(9, 2);
-  std::string pos_str  = target_packet.substr(15, 6);
+  try {
+    std::string id_str   = target_packet.substr(5, 1);
+    std::string cmd_str  = target_packet.substr(9, 2);
+    std::string pos_str  = target_packet.substr(15, 6);
 
-  int id_val  = std::stoi(id_str, nullptr, 16);
-  int cmd = std::stoi(cmd_str, nullptr, 16);
-  int pos = std::stoi(pos_str, nullptr, 16);
-  return {id_val, cmd, pos};
+    int id_val  = std::stoi(id_str, nullptr, 16);
+    int cmd = std::stoi(cmd_str, nullptr, 16);
+    int pos = std::stoi(pos_str, nullptr, 16);
+    return {id_val, cmd, pos};
+  } catch (const std::exception& e) {
+    std::cout << "[getPosition] failed to parse final packet: " << e.what() << std::endl;
+    return {0, 0, 0};
+  }
 }
 
 void SeedCommand::COM_Close() {

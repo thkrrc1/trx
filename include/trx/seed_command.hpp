@@ -25,6 +25,7 @@ public:
     bool readSerialCommand(std::vector<uint8_t>& _receive_data, uint16_t _timeout);
     double pulse_to_rad_thumb(int pulse);
     int rad_to_pulse_thumb(double rad);
+    bool waitForScriptEnd(int id_num, double timeout_sec = 10.0);
     
 private:
     std::string port_;

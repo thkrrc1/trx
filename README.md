@@ -101,6 +101,17 @@
     下記画像のようにrqtのGUIが起動し、jointsのスライダーを動かして動作することが確認できればok.
     ![rqt＿GUI](https://github.com/user-attachments/assets/eb2d4a19-3fc8-461d-a316-50dc0c0b4c59)
 
+1. スクリプト実行
+
+    新規ターミナルを開いて以下のサービスを呼び出すことで、trxのモータードライバー(SEED MC)にあらかじめ書き込まれている動作スクリプトをROS2側から番号指定で実行できる。
+    ```terminal
+    $ ros2 service call /trx/run_script trx/srv/RunScript "{id: 1, script_no: 1}"
+    ```
+    - `id` : 実行対象のドライバのID（`urdf`の`can_id1`/`can_id2`のいずれか）
+    - `script_no` : 実行したいスクリプト番号（1〜14。ドライバ側に書き込み済みのスクリプトのみ実行可能）
+
+    ※スクリプト実行中〜完了検知までの間（最大10秒程度）、`read()`/`write()`による通常の位置制御・Rvizへの姿勢の反映は一時停止する。スクリプト終了後は、その時点のtrxの姿勢を保持するようにコントローラの目標値も自動的に更新される。
+
 ## ※諸注意
 1. ID変更対応<br>
    制御するtrxのモータードライバー(SEED MC)のIDを把握した上で、ソースコード内の下記パラメータの記述を適宜修正してください。
@@ -118,5 +129,61 @@
 2. 依存パッケージ不具合（26/5/15 時点）<br>
    ros-jazzy-joint-trajectory-controller、ros-jazzy-joint-state-broadcasterのパッケージバージョン v4.39において、Nodeが正常に起動しない不具合を確認しております。
    構築環境にてこれらに起因する不具合を確認した場合、各パッケージ 推奨バージョン v4.36にダウングレードした上で、本パッケージを再度ビルドして動作をお試しください。
+
+3. ros2_controlのバージョン不整合によるクラッシュ（26/7/16 時点）<br>
+   apt upgrade後、ros2 launch trx bringup.launch.py 実行時にros2_control_node がクラッシュする不具合を確認いたしました。
+
+   **対処方法**<br>
+   上記のクラッシュが発生した場合は、以下の手順でワークスペース内の `hardware_interface`/`controller_manager`/`joint_limits` を、apt版と同じバージョンに更新してください。
+
+   1. apt版 `hardware_interface` のバージョンを確認する
+      ```bash
+      apt-cache policy ros-jazzy-hardware-interface | head -n2
+      ```
+      表示された `4.45.2-1noble...` のようなバージョン番号のうち、先頭の `4.45.2` の部分を控える
+
+   2. 本家 `ros-controls/ros2_control` から、同じバージョンのタグを取得する
+      ```bash
+      git clone --depth 1 --branch <控えたバージョン番号> https://github.com/ros-controls/ros2_control.git ros2_control_latest
+      ```
+
+   3. ワークスペースの3パッケージを、取得した内容で丸ごと置き換える
+      ```bash
+      cd ~/ros2_ws/src/seed_robot_ros2_pkg/controller/ros2_control
+      for pkg in hardware_interface controller_manager joint_limits; do
+        rm -rf "$pkg"
+        cp -r "$HOME/ros2_control_latest/$pkg" "$pkg"
+      done
+      ```
+
+   4. `delegate()` を新バージョンに手動で再度追加する
+      - `hardware_interface/include/hardware_interface/handle.hpp` の `StateInterface` クラス内に追記
+        ```cpp
+        template<class T>
+        void delegate(T func) const{
+          func(get_prefix_name(), value_ptr_);
+        }
+        ```
+      - `hardware_interface/include/hardware_interface/loaned_state_interface.hpp` の `LoanedStateInterface` クラス内に追記
+        ```cpp
+        template<class T>
+        void delegate(T func) {
+          state_interface_.delegate(func);
+        }
+        ```
+   5. クリーンビルドする
+      ```bash
+      colcon clean workspace
+      source /opt/ros/jazzy/setup.bash
+      cd ~/ros2_ws
+      colcon build --symlink-install
+      source install/setup.bash
+      ```
+   6. 起動確認する
+      ```bash
+      ros2 launch trx bringup.launch.py
+      ```
+      <br><br>
+
 
 以上
